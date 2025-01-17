@@ -7,7 +7,6 @@ import (
 	"github.com/goravel/framework/facades"
 	amqp "github.com/rabbitmq/amqp091-go"
 	"log"
-	"time"
 )
 
 type Rabbitmq struct {
@@ -164,8 +163,9 @@ func (r *Rabbitmq) ReceiverTopic(exchangeName, key string) (<-chan amqp.Delivery
 	)
 }
 
-func (r *Rabbitmq) Consume() {
-	msgs, err := r.channel.Consume(
+func (r *Rabbitmq) ConsumeMsg() (<-chan amqp.Delivery, error) {
+	defer r.Close()
+	return r.channel.Consume(
 		r.queueName,
 		"",
 		false,
@@ -174,29 +174,13 @@ func (r *Rabbitmq) Consume() {
 		false,
 		nil,
 	)
-	if err != nil {
-		log.Printf("consume error: %s", err.Error())
-		return
-	}
-	var forever chan struct{}
-	go func() {
-		for data := range msgs {
-			log.Printf("接收到mq的普通消息是：%s", string(data.Body))
-			err := data.Ack(false)
-			if err != nil {
-				log.Printf("ack error: %s", err.Error())
-			}
-			time.Sleep(time.Second)
-		}
-	}()
-	<-forever
 }
 
 /*
 *
 接受订阅模式的消息,多个消费者收到的消息是一样的（类似把一则消息广播给多个人，每个人收到的消息是一致的）
 */
-func (r *Rabbitmq) ConsumePublish(exchangeName string) error {
+func (r *Rabbitmq) ConsumePublish(exchangeName string) (<-chan amqp.Delivery, error) {
 	defer r.Close()
 	// 1、声明交换机
 	err := r.channel.ExchangeDeclare(
@@ -209,7 +193,7 @@ func (r *Rabbitmq) ConsumePublish(exchangeName string) error {
 		nil,          // arguments
 	)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	// 2、声明一个队列，队名的名称会随机生成
 	q, err := r.channel.QueueDeclare(
@@ -221,7 +205,7 @@ func (r *Rabbitmq) ConsumePublish(exchangeName string) error {
 		nil,   // arguments
 	)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	// 3、交换机绑定上面创建的队列
@@ -233,11 +217,11 @@ func (r *Rabbitmq) ConsumePublish(exchangeName string) error {
 		nil,
 	)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	// 4、消费消息
-	msgs, err := r.channel.Consume(
+	return r.channel.Consume(
 		q.Name, // queue
 		"",     // consumer
 		false,  // auto ack
@@ -246,29 +230,14 @@ func (r *Rabbitmq) ConsumePublish(exchangeName string) error {
 		false,  // no wait
 		nil,    // args
 	)
-	if err != nil {
-		return err
-	}
-	forever := make(chan bool)
-	go func() {
-		for msg := range msgs {
-			log.Printf("[%s:%s]订阅消息：%s", exchangeName, q.Name, string(msg.Body))
-			err := msg.Ack(false)
-			if err != nil {
-				log.Printf("ack error: %s", err.Error())
-			}
-			time.Sleep(time.Second)
-		}
-	}()
-	<-forever
-	return nil
+
 }
 
 /*
 *
 接受路由消息：当前消费者只会消费当前交换机产生指定key的消息
 */
-func (r *Rabbitmq) ConsumeRouting(exchangeName, key string) error {
+func (r *Rabbitmq) ConsumeRouting(exchangeName, key string) (<-chan amqp.Delivery, error) {
 	defer r.Close()
 	// 1、声明交换机
 	err := r.channel.ExchangeDeclare(
@@ -281,7 +250,7 @@ func (r *Rabbitmq) ConsumeRouting(exchangeName, key string) error {
 		nil,          // arguments
 	)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	// 2、声明一个队列，队名的名称会随机生成
 	q, err := r.channel.QueueDeclare(
@@ -293,7 +262,7 @@ func (r *Rabbitmq) ConsumeRouting(exchangeName, key string) error {
 		nil,   // arguments
 	)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	// 3、交换机绑定上面创建的队列
@@ -305,11 +274,11 @@ func (r *Rabbitmq) ConsumeRouting(exchangeName, key string) error {
 		nil,
 	)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	// 4、消费消息
-	msgs, err := r.channel.Consume(
+	return r.channel.Consume(
 		q.Name, // queue
 		"",     // consumer
 		false,  // auto ack
@@ -318,22 +287,6 @@ func (r *Rabbitmq) ConsumeRouting(exchangeName, key string) error {
 		false,  // no wait
 		nil,    // args
 	)
-	if err != nil {
-		return err
-	}
-	forever := make(chan bool)
-	go func() {
-		for msg := range msgs {
-			log.Printf("[%s:%s:%s]路由消息：%s", exchangeName, q.Name, key, string(msg.Body))
-			err := msg.Ack(false)
-			if err != nil {
-				log.Printf("ack error: %s", err.Error())
-			}
-			time.Sleep(time.Second)
-		}
-	}()
-	<-forever
-	return nil
 }
 
 /*
@@ -343,7 +296,7 @@ china.yunnan.kunming (中国.云南.昆明)
 *: 匹配一个单词,例如，如果队列绑定的Routing Key是user.*，那么它将匹配user.123、user.abc等Routing Key，但不会匹配user.123.456。
 #:匹配零个或多个单词,如果队列绑定的Routing Key是user.#，那么它将匹配user、user.123、user.abc以及user.123.456等Routing Key。
 */
-func (r *Rabbitmq) ConsumeTopic(exchangeName, key string) error {
+func (r *Rabbitmq) ConsumeTopic(exchangeName, key string) (<-chan amqp.Delivery, error) {
 	defer r.Close()
 	// 1、声明交换机
 	err := r.channel.ExchangeDeclare(
@@ -356,7 +309,7 @@ func (r *Rabbitmq) ConsumeTopic(exchangeName, key string) error {
 		nil,          // arguments
 	)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	// 2、声明一个队列，队名的名称会随机生成
 	q, err := r.channel.QueueDeclare(
@@ -368,7 +321,7 @@ func (r *Rabbitmq) ConsumeTopic(exchangeName, key string) error {
 		nil,   // arguments
 	)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	// 3、交换机绑定上面创建的队列
@@ -380,11 +333,11 @@ func (r *Rabbitmq) ConsumeTopic(exchangeName, key string) error {
 		nil,
 	)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	// 4、消费消息
-	msgs, err := r.channel.Consume(
+	return r.channel.Consume(
 		q.Name, // queue
 		"",     // consumer
 		false,  // auto ack
@@ -393,20 +346,4 @@ func (r *Rabbitmq) ConsumeTopic(exchangeName, key string) error {
 		false,  // no wait
 		nil,    // args
 	)
-	if err != nil {
-		return err
-	}
-	forever := make(chan bool)
-	go func() {
-		for msg := range msgs {
-			log.Printf("[%s:%s:%s]主题消息：%s", exchangeName, q.Name, key, string(msg.Body))
-			err := msg.Ack(false)
-			if err != nil {
-				log.Printf("ack error: %s", err.Error())
-			}
-			time.Sleep(time.Second)
-		}
-	}()
-	<-forever
-	return nil
 }
