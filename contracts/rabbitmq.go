@@ -1,6 +1,9 @@
 package contracts
 
-import "github.com/rabbitmq/amqp091-go"
+import (
+	"github.com/orangbus/rabbitmq"
+	"github.com/rabbitmq/amqp091-go"
+)
 
 type Rabbitmq interface {
 	Msg(msg any) error
@@ -12,4 +15,6 @@ type Rabbitmq interface {
 	ConsumePublish(exchangeName string) (<-chan amqp091.Delivery, error)
 	ConsumeRouting(exchangeName, key string) (<-chan amqp091.Delivery, error)
 	ConsumeTopic(exchangeName, key string) (<-chan amqp091.Delivery, error)
+
+	Dlx() *rabbitmq.Dlx
 }

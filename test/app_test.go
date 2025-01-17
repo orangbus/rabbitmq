@@ -204,3 +204,15 @@ func TestConsumeTopic(t *testing.T) {
 	}()
 	<-forever
 }
+
+func TestDeadMsg(t *testing.T) {
+
+}
+
+func TestDeadConsumeMsg(t *testing.T) {
+
+}
+
+func TestConsumeDlxMsg(t *testing.T) {
+
+}

@@ -42,6 +42,10 @@ func NewRabbitmq() (*Rabbitmq, error) {
 	return mq, nil
 }
 
+func (c *Rabbitmq) Dlx() *Dlx {
+	return NewDlx(c)
+}
+
 func (c *Rabbitmq) Close() {
 	if err := c.channel.Close(); err != nil {
 		log.Printf("rabbitmq channel close error: %v", err)
