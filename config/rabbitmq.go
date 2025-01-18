@@ -13,5 +13,14 @@ func init() {
 		"password": config.Env("RABBITMQ_PASSWORD", "guest"),
 		"vhost":    config.Env("RABBITMQ_VHOST", "/"),
 		"queue":    config.Env("RABBITMQ_QUEUE", "dev"),
+		"dlx": map[string]any{
+			"exchange": config.Env("RABBITMQ_DLX_EXCHANGE", "dlx.exchange"),
+			"timeout":  config.Env("RABBITMQ_DLX_TIMEOUT", 5000),
+		},
+		"dead": map[string]any{
+			"exchange":    config.Env("RABBITMQ_DEAD_EXCHANGE", "dead.exchange"),
+			"queue":       config.Env("RABBITMQ_DEAD_QUEUE", "dead.queue"),
+			"routing_key": config.Env("RABBITMQ_DEAD_ROUTING_KEY", "dead.routing_key"),
+		},
 	})
 }

@@ -2,6 +2,8 @@ package rabbitmq
 
 import (
 	"encoding/json"
+	"github.com/goravel/framework/facades"
+	"github.com/mitchellh/mapstructure"
 	amqp "github.com/rabbitmq/amqp091-go"
 )
 
@@ -9,43 +11,45 @@ type Dlx struct {
 	client       *Rabbitmq
 	queueName    string
 	exchangeName string
-	key          string
 	routingKey   string
 
 	deadExchangeName string
-	deadKey          string
 	deadQueue        string
 	deadRoutingKey   string
 }
 
 func NewDlx(r *Rabbitmq) *Dlx {
-	return &Dlx{client: r, deadExchangeName: "dlx.exchange", deadKey: "dlx.key"}
+	setting := facades.Config().Get("rabbitmq.dead")
+	var dead map[string]string
+	if err := mapstructure.Decode(setting, &dead); err != nil {
+		panic(err)
+	}
+	d := Dlx{client: r}
+	d.deadExchangeName = dead["exchange"]
+	d.deadQueue = dead["queue"]
+	d.deadRoutingKey = dead["routing_key"]
+	return &d
 }
 
-func (d *Dlx) SetOption(exchangeName, queueName, key, routingKey string) *Dlx {
-	d.queueName = exchangeName
-	d.exchangeName = queueName
-	d.key = key
-	d.routingKey = routingKey
-	return d
-}
-func (d *Dlx) SetDeadOption(exchangeName, queueName, key, routingKey string) *Dlx {
-	d.deadQueue = exchangeName
-	d.deadExchangeName = queueName
-	d.deadKey = key
-	d.deadRoutingKey = routingKey
-	return d
-}
-
-func (d *Dlx) PushMsg(exchangeName string, msg any, timeout int) error {
+func (d *Dlx) SetOption(exchangeName, queueName string) *Dlx {
 	d.exchangeName = exchangeName
-	d.queueName = "dlx.queue"
+	d.queueName = queueName
+	return d
+}
 
-	// 1、声明队列
+func (d *Dlx) PushMsg(routingKey string, msg any, timeout int) error {
+	d.routingKey = routingKey
+	setting := facades.Config().Get("rabbitmq.dlx")
+	var dxl map[string]any
+	if err := mapstructure.Decode(setting, &dxl); err != nil {
+		return err
+	}
+
+	// 1、声明正常队列
 	_, err := d.client.channel.QueueDeclare(d.queueName, true, false, false, false, amqp.Table{
-		"x-dead-letter-exchange":    "dlx.exchange", // 指定死信交换机
-		"x-dead-letter-routing-key": "dlx.key",      // 指定死信routing-key
-		"x-message-ttl":             timeout,        // 消息过期时间,毫秒
+		"x-dead-letter-exchange":    d.deadExchangeName, //dxl["exchange"], // 指定死信交换机
+		"x-dead-letter-routing-key": d.deadRoutingKey,   // 指定死信routing-key
+		"x-message-ttl":             timeout,            // 消息过期时间,毫秒
 	})
 	if err != nil {
 		return err
@@ -58,7 +62,7 @@ func (d *Dlx) PushMsg(exchangeName string, msg any, timeout int) error {
 	}
 
 	// 3、绑定交换机
-	err = d.client.channel.QueueBind(d.queueName, d.key, d.exchangeName, false, nil)
+	err = d.client.channel.QueueBind(d.queueName, d.routingKey, d.exchangeName, false, nil)
 	if err != nil {
 		return err
 	}
@@ -86,11 +90,9 @@ func (d *Dlx) PushMsg(exchangeName string, msg any, timeout int) error {
 }
 
 func (d *Dlx) ConsumeMsg(queueName string) (<-chan amqp.Delivery, error) {
-	d.queueName = queueName
-	return d.client.channel.Consume(d.queueName, "", false, false, false, false, nil)
+	return d.client.channel.Consume(queueName, "", false, false, false, false, nil)
 }
 
 func (d *Dlx) ConsumeDlxMsg(deadQueueName string) (<-chan amqp.Delivery, error) {
-	d.deadQueue = deadQueueName
-	return d.client.channel.Consume(d.deadQueue, "", false, false, false, false, nil)
+	return d.client.channel.Consume(deadQueueName, "", false, false, false, false, nil)
 }

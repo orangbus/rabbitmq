@@ -3,6 +3,8 @@ package test
 import (
 	"fmt"
 	"github.com/goravel/framework/facades"
+	"github.com/goravel/framework/support/carbon"
+	"github.com/mitchellh/mapstructure"
 	"github.com/orangbus/rabbitmq/bootstrap"
 	rabbit "github.com/orangbus/rabbitmq/facades"
 	"log"
@@ -42,6 +44,24 @@ func TestConfig(t *testing.T) {
 	vhost := facades.Config().GetString("rabbitmq.vhost")
 	sdn := fmt.Sprintf("amqp://%s:%s@%s:%d/%s", name, password, host, port, vhost)
 	t.Log(sdn)
+
+	setting := facades.Config().Get("rabbitmq.dlx")
+	var dxl map[string]any
+	mapstructure.Decode(setting, &dxl)
+	t.Logf("dxl_exchange:%s", dxl["exchange"])
+	t.Logf("dxl_key:%s", dxl["key"])
+	t.Logf("dxl_timeout:%d", dxl["timeout"])
+	t.Log(setting)
+
+	setting2 := facades.Config().Get("rabbitmq.dead")
+	var dead map[string]string
+	mapstructure.Decode(setting2, &dead)
+
+	t.Logf("dead_exchange:%s", dead["exchange"])
+	t.Logf("dead_key:%s", dead["key"])
+	t.Logf("dead_queue:%s", dead["queue"])
+	t.Logf("dead_routing_key:%s", dead["routing_key"])
+	t.Log(setting2)
 }
 
 func TestMsg(t *testing.T) {
@@ -206,13 +226,55 @@ func TestConsumeTopic(t *testing.T) {
 }
 
 func TestDeadMsg(t *testing.T) {
-
+	total := 0
+	for {
+		total++
+		msg := fmt.Sprintf("[%d]订单信息:%s", total, carbon.Now().ToDateTimeString())
+		if err := rabbit.Rabbitmq().Dlx().SetOption("demo_exchange", "demo_queue").PushMsg("demo_key", msg, 10000); err != nil {
+			t.Log(err)
+			return
+		}
+		t.Log(msg)
+		time.Sleep(time.Second)
+	}
 }
 
 func TestDeadConsumeMsg(t *testing.T) {
-
+	msgs, err := rabbit.Rabbitmq().Dlx().ConsumeMsg("demo_queue")
+	if err != nil {
+		t.Log(err.Error())
+		return
+	}
+	forever := make(chan bool)
+	go func() {
+		for msg := range msgs {
+			log.Printf("正常死信消息：%s", string(msg.Body))
+			err := msg.Ack(false)
+			if err != nil {
+				log.Printf("ack error: %s", err.Error())
+			}
+			time.Sleep(time.Second)
+		}
+	}()
+	<-forever
 }
 
 func TestConsumeDlxMsg(t *testing.T) {
-
+	msgs, err := rabbit.Rabbitmq().Dlx().ConsumeDlxMsg("dead.queue")
+	if err != nil {
+		t.Log(err.Error())
+		return
+	}
+	forever := make(chan bool)
+	go func() {
+		for msg := range msgs {
+			log.Printf("死信消息：%s", string(msg.Body))
+			err := msg.Ack(false)
+			if err != nil {
+				log.Printf("ack error: %s", err.Error())
+			}
+			//time.Sleep(time.Second)
+		}
+	}()
+	<-forever
 }
