@@ -230,7 +230,7 @@ func TestDeadMsg(t *testing.T) {
 	for {
 		total++
 		msg := fmt.Sprintf("[%d]订单信息:%s", total, carbon.Now().ToDateTimeString())
-		if err := rabbit.Rabbitmq().Dlx().SetOption("demo_exchange", "demo_queue").PushMsg("demo_key", msg, 10000); err != nil {
+		if err := rabbit.Rabbitmq().Dlx().SetOption("demo_exchange", "demo_queue").PushMsg("demo_key", msg); err != nil {
 			t.Log(err)
 			return
 		}
@@ -238,7 +238,6 @@ func TestDeadMsg(t *testing.T) {
 		time.Sleep(time.Second)
 	}
 }
-
 func TestDeadConsumeMsg(t *testing.T) {
 	msgs, err := rabbit.Rabbitmq().Dlx().ConsumeMsg("demo_queue")
 	if err != nil {
@@ -258,7 +257,6 @@ func TestDeadConsumeMsg(t *testing.T) {
 	}()
 	<-forever
 }
-
 func TestConsumeDlxMsg(t *testing.T) {
 	msgs, err := rabbit.Rabbitmq().Dlx().ConsumeDlxMsg("dead.queue")
 	if err != nil {
@@ -269,6 +267,44 @@ func TestConsumeDlxMsg(t *testing.T) {
 	go func() {
 		for msg := range msgs {
 			log.Printf("死信消息：%s", string(msg.Body))
+			err := msg.Ack(false)
+			if err != nil {
+				log.Printf("ack error: %s", err.Error())
+			}
+			//time.Sleep(time.Second)
+		}
+	}()
+	<-forever
+}
+
+func TestDeadMsgDelay(t *testing.T) {
+	total := 0
+	delay := 10
+	for {
+		total++
+		delay--
+		if delay == 0 {
+			delay = 10
+		}
+		msg := fmt.Sprintf("[%d]订单延迟%d秒信息:%s", total, delay, carbon.Now().ToDateTimeString())
+		if err := rabbit.Rabbitmq().Dlx().SetOption("delay_exchange", "delay_queue").PushMsgWithTimeout("delay_key", msg, total); err != nil {
+			t.Log(err)
+			return
+		}
+		t.Log(msg)
+		time.Sleep(time.Second)
+	}
+}
+func TestConsumeDlxMsgDelay(t *testing.T) {
+	msgs, err := rabbit.Rabbitmq().Dlx().ConsumeDlxMsg("delay_queue")
+	if err != nil {
+		t.Log(err.Error())
+		return
+	}
+	forever := make(chan bool)
+	go func() {
+		for msg := range msgs {
+			log.Printf("delay死信消息：%s", string(msg.Body))
 			err := msg.Ack(false)
 			if err != nil {
 				log.Printf("ack error: %s", err.Error())

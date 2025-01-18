@@ -16,6 +16,7 @@ type Dlx struct {
 	deadExchangeName string
 	deadQueue        string
 	deadRoutingKey   string
+	timeout          int
 }
 
 func NewDlx(r *Rabbitmq) *Dlx {
@@ -37,19 +38,14 @@ func (d *Dlx) SetOption(exchangeName, queueName string) *Dlx {
 	return d
 }
 
-func (d *Dlx) PushMsg(routingKey string, msg any, timeout int) error {
+func (d *Dlx) PushMsg(routingKey string, msg any) error {
 	d.routingKey = routingKey
-	setting := facades.Config().Get("rabbitmq.dlx")
-	var dxl map[string]any
-	if err := mapstructure.Decode(setting, &dxl); err != nil {
-		return err
-	}
 
 	// 1、声明正常队列
 	_, err := d.client.channel.QueueDeclare(d.queueName, true, false, false, false, amqp.Table{
-		"x-dead-letter-exchange":    d.deadExchangeName, //dxl["exchange"], // 指定死信交换机
+		"x-dead-letter-exchange":    d.deadExchangeName, // 指定死信交换机
 		"x-dead-letter-routing-key": d.deadRoutingKey,   // 指定死信routing-key
-		"x-message-ttl":             timeout,            // 消息过期时间,毫秒
+		"x-message-ttl":             10 * 1000,          // 消息过期时间,毫秒
 	})
 	if err != nil {
 		return err
@@ -86,6 +82,54 @@ func (d *Dlx) PushMsg(routingKey string, msg any, timeout int) error {
 		DeliveryMode: amqp.Persistent,
 		ContentType:  "text/plain",
 		Body:         data,
+	})
+}
+func (d *Dlx) PushMsgWithTimeout(routingKey string, msg any, delay int) error {
+	d.routingKey = routingKey
+
+	// 1、声明正常队列
+	_, err := d.client.channel.QueueDeclare(d.queueName, true, false, false, false, amqp.Table{
+		"x-dead-letter-exchange":    d.deadExchangeName, // 指定死信交换机
+		"x-dead-letter-routing-key": d.deadRoutingKey,   // 指定死信routing-key
+	})
+	if err != nil {
+		return err
+	}
+
+	// 2、声明交换机:插件的交换机名称https://github.com/rabbitmq/rabbitmq-delayed-message-exchange
+	err = d.client.channel.ExchangeDeclare(d.exchangeName, "x-delayed-message", true, false, false, false, amqp.Table{
+		"x-delayed-type": "direct",
+	})
+	if err != nil {
+		return err
+	}
+
+	// 3、绑定交换机
+	err = d.client.channel.QueueBind(d.queueName, d.routingKey, d.exchangeName, false, nil)
+	if err != nil {
+		return err
+	}
+
+	// 4、声明死信队列
+	_, err = d.client.channel.QueueDeclare(d.deadQueue, true, false, false, false, nil)
+	// 5、声明死信交换机
+	if err = d.client.channel.ExchangeDeclare(d.deadExchangeName, amqp.ExchangeDirect, true, false, false, false, nil); err != nil {
+		return err
+	}
+	// 6、绑定死信交换机
+	if err = d.client.channel.QueueBind(d.deadQueue, d.deadRoutingKey, d.deadExchangeName, false, nil); err != nil {
+		return err
+	}
+	// 发送消息
+	data, err := json.Marshal(msg)
+	if err != nil {
+		return err
+	}
+	return d.client.channel.Publish(d.exchangeName, d.routingKey, false, false, amqp.Publishing{
+		DeliveryMode: amqp.Persistent,
+		ContentType:  "text/plain",
+		Body:         data,
+		Headers:      amqp.Table{"x-delay": delay * 1000},
 	})
 }
 
