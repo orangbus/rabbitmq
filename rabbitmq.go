@@ -168,7 +168,6 @@ func (r *Rabbitmq) ReceiverTopic(exchangeName, key string) (<-chan amqp.Delivery
 }
 
 func (r *Rabbitmq) ConsumeMsg() (<-chan amqp.Delivery, error) {
-	defer r.Close()
 	return r.channel.Consume(
 		r.queueName,
 		"",
@@ -185,7 +184,7 @@ func (r *Rabbitmq) ConsumeMsg() (<-chan amqp.Delivery, error) {
 接受订阅模式的消息,多个消费者收到的消息是一样的（类似把一则消息广播给多个人，每个人收到的消息是一致的）
 */
 func (r *Rabbitmq) ConsumePublish(exchangeName string) (<-chan amqp.Delivery, error) {
-	defer r.Close()
+	//defer r.Close()
 	// 1、声明交换机
 	err := r.channel.ExchangeDeclare(
 		exchangeName, // name
@@ -242,7 +241,7 @@ func (r *Rabbitmq) ConsumePublish(exchangeName string) (<-chan amqp.Delivery, er
 接受路由消息：当前消费者只会消费当前交换机产生指定key的消息
 */
 func (r *Rabbitmq) ConsumeRouting(exchangeName, key string) (<-chan amqp.Delivery, error) {
-	defer r.Close()
+	//defer r.Close()
 	// 1、声明交换机
 	err := r.channel.ExchangeDeclare(
 		exchangeName, // name
@@ -301,7 +300,7 @@ china.yunnan.kunming (中国.云南.昆明)
 #:匹配零个或多个单词,如果队列绑定的Routing Key是user.#，那么它将匹配user、user.123、user.abc以及user.123.456等Routing Key。
 */
 func (r *Rabbitmq) ConsumeTopic(exchangeName, key string) (<-chan amqp.Delivery, error) {
-	defer r.Close()
+	//defer r.Close()
 	// 1、声明交换机
 	err := r.channel.ExchangeDeclare(
 		exchangeName, // name

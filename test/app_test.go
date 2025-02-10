@@ -19,8 +19,8 @@ func init() {
 
 var (
 	msg_open     = false
-	publish_open = true
-	routing_open = false
+	publish_open = false
+	routing_open = true
 	top_open     = false
 
 	publish_exchangeName = "publish_exchange"
@@ -187,7 +187,7 @@ func TestConsumePublish(t *testing.T) {
 
 }
 func TestConsumeRouting(t *testing.T) {
-	msgs, err := rabbit.Rabbitmq().ConsumeRouting(routing_exchangeName, routing_key)
+	msgs, err := rabbit.Rabbitmq().ConsumeRouting(routing_exchangeName, "error") // info
 	if err != nil {
 		t.Log(err.Error())
 		return
