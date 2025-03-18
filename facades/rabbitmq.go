@@ -1,17 +1,15 @@
 package facades
 
 import (
-	"log"
-
 	"github.com/orangbus/rabbitmq"
 	"github.com/orangbus/rabbitmq/contracts"
+	"log"
 )
 
 func Rabbitmq() contracts.Rabbitmq {
 	instance, err := rabbitmq.App.Make(rabbitmq.Binding)
 	if err != nil {
-		log.Println("mq初始化错误")
-		log.Println(err)
+		log.Printf("rabbitmq make error: %v", err)
 		return nil
 	}
 

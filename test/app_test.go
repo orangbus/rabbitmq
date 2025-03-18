@@ -9,6 +9,7 @@ import (
 	rabbit "github.com/orangbus/rabbitmq/facades"
 	"log"
 	"math/rand"
+	"sync"
 	"testing"
 	"time"
 )
@@ -18,9 +19,9 @@ func init() {
 }
 
 var (
-	msg_open     = false
+	msg_open     = true
 	publish_open = false
-	routing_open = true
+	routing_open = false
 	top_open     = false
 
 	publish_exchangeName = "publish_exchange"
@@ -64,6 +65,7 @@ func TestConfig(t *testing.T) {
 	t.Log(setting2)
 }
 
+// 发送消息
 func TestMsg(t *testing.T) {
 	if msg_open {
 		go func() {
@@ -75,7 +77,7 @@ func TestMsg(t *testing.T) {
 					log.Printf("rabbitmq 普通消息发送失败：%s", err.Error())
 				}
 				log.Printf("rabbitmq 普通消息发送成功：%d", total)
-				time.Sleep(time.Second)
+				time.Sleep(time.Millisecond * 500)
 			}
 		}()
 	}
@@ -144,6 +146,7 @@ func TestMsg(t *testing.T) {
 	select {}
 }
 
+// 消费消息
 func TestConsume(t *testing.T) {
 	msgs, err := rabbit.Rabbitmq().ConsumeMsg()
 	if err != nil {
@@ -164,7 +167,6 @@ func TestConsume(t *testing.T) {
 	}()
 	<-forever
 }
-
 func TestConsumePublish(t *testing.T) {
 	msgs, err := rabbit.Rabbitmq().ConsumePublish(publish_exchangeName)
 	if err != nil {
@@ -313,4 +315,30 @@ func TestConsumeDlxMsgDelay(t *testing.T) {
 		}
 	}()
 	<-forever
+}
+
+func TestName(t *testing.T) {
+	var wg sync.WaitGroup
+	ch := make(chan int, 100)
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+
+		for i := 0; i < 100; i++ {
+			ch <- i
+			time.Sleep(time.Second)
+		}
+		close(ch)
+	}()
+
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for number := range ch {
+			if err := rabbit.Rabbitmq().Msg(fmt.Sprintf("%d 测试mq消息", number)); err != nil {
+				log.Printf("【%d】rabbitmq 普通消息发送失败：%s", number, err.Error())
+			}
+		}
+	}()
+	wg.Wait()
 }
