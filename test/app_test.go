@@ -324,9 +324,9 @@ func TestName(t *testing.T) {
 	go func() {
 		defer wg.Done()
 
-		for i := 0; i < 100; i++ {
+		for i := 0; i < 1000; i++ {
 			ch <- i
-			time.Sleep(time.Second)
+			//time.Sleep(time.Second)
 		}
 		close(ch)
 	}()
@@ -340,5 +340,21 @@ func TestName(t *testing.T) {
 			}
 		}
 	}()
+	wg.Wait()
+}
+
+func TestName2(t *testing.T) {
+	var wg sync.WaitGroup
+	for i := 0; i < 5; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for i := 0; i < 1000; i++ {
+				if err := rabbit.Rabbitmq().Msg(fmt.Sprintf("%d 测试mq消息", i)); err != nil {
+					log.Printf("【%d】rabbitmq 普通消息发送失败：%s", i, err.Error())
+				}
+			}
+		}()
+	}
 	wg.Wait()
 }

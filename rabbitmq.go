@@ -78,7 +78,7 @@ func (r *Rabbitmq) seed(data any) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	if r.channel == nil || !r.channel.IsClosed() {
+	if r.channel == nil || r.channel.IsClosed() {
 		return fmt.Errorf("channel is not open")
 	}
 
