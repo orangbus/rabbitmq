@@ -326,7 +326,7 @@ func TestName(t *testing.T) {
 
 		for i := 0; i < 1000; i++ {
 			ch <- i
-			//time.Sleep(time.Second)
+			time.Sleep(time.Second)
 		}
 		close(ch)
 	}()

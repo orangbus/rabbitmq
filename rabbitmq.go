@@ -45,6 +45,18 @@ func NewRabbitmq() (*Rabbitmq, error) {
 	return mq, nil
 }
 
+// 检查通道是否关闭
+func (r *Rabbitmq) checkChannel() error {
+	if r.channel != nil || !r.channel.IsClosed() {
+		return nil
+	}
+	log.Println("channel 重新连接了")
+	if _, err := NewRabbitmq(); err != nil {
+		return err
+	}
+	return nil
+}
+
 // 声明交换机
 func (r *Rabbitmq) declareExchange(name, kind string, durable, autoDelete, internal, noWait bool, args amqp.Table) error {
 	return r.channel.ExchangeDeclare(name, kind, durable, autoDelete, internal, noWait, args)
@@ -78,8 +90,8 @@ func (r *Rabbitmq) seed(data any) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	if r.channel == nil || r.channel.IsClosed() {
-		return fmt.Errorf("channel is not open")
+	if err := r.checkChannel(); err != nil {
+		return err
 	}
 
 	return r.channel.PublishWithContext(r.ctx, "", r.queueName, false, false, amqp.Publishing{
@@ -94,6 +106,9 @@ func (r *Rabbitmq) seed(data any) error {
 发送一个普通消息，由默认的队列接受消息
 */
 func (r *Rabbitmq) Msg(data any) error {
+	if err := r.checkChannel(); err != nil {
+		return err
+	}
 	_, err := r.declareQueue(r.queueName, true, false, false, false, nil)
 	if err != nil {
 		return err
@@ -108,6 +123,9 @@ func (r *Rabbitmq) Msg(data any) error {
 发布订阅模式：消息发送给交换机，由交换机路由到队列，由队列接受消息，可以由多个消费者消息
 */
 func (r *Rabbitmq) Publish(exchangeName string, data interface{}) error {
+	if err := r.checkChannel(); err != nil {
+		return err
+	}
 	// 1、定义交换机
 	err := r.declareExchange(exchangeName, "fanout", true, false, false, false, nil)
 	if err != nil {
@@ -122,8 +140,8 @@ func (r *Rabbitmq) Publish(exchangeName string, data interface{}) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	if r.channel == nil || !r.channel.IsClosed() {
-		return fmt.Errorf("channel is not open")
+	if err := r.checkChannel(); err != nil {
+		return err
 	}
 
 	return r.channel.PublishWithContext(r.ctx, exchangeName, "", false, false, amqp.Publishing{
@@ -138,6 +156,9 @@ func (r *Rabbitmq) Publish(exchangeName string, data interface{}) error {
 举例：系统产生了错误消息，但是要求 A消费者只能接受 key=info 的消息，B消费者只能接受 key=debug 的消息， ....
 */
 func (r *Rabbitmq) Routing(exchangeName, key string, data interface{}) error {
+	if err := r.checkChannel(); err != nil {
+		return err
+	}
 	// 1、定义 direct 类型的交换机
 	if err := r.declareExchange(exchangeName, "direct", true, false, false, false, nil); err != nil {
 		return err
@@ -150,8 +171,8 @@ func (r *Rabbitmq) Routing(exchangeName, key string, data interface{}) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	if r.channel == nil || !r.channel.IsClosed() {
-		return fmt.Errorf("channel is not open")
+	if err := r.checkChannel(); err != nil {
+		return err
 	}
 
 	return r.channel.PublishWithContext(r.ctx, exchangeName, key, false, false, amqp.Publishing{
@@ -161,6 +182,9 @@ func (r *Rabbitmq) Routing(exchangeName, key string, data interface{}) error {
 }
 
 func (r *Rabbitmq) Topic(exchangeName, key string, data interface{}) error {
+	if err := r.checkChannel(); err != nil {
+		return err
+	}
 	// 1、定义交换机
 	if err := r.declareExchange(exchangeName, "topic", true, false, false, false, nil); err != nil {
 		return err
@@ -174,8 +198,8 @@ func (r *Rabbitmq) Topic(exchangeName, key string, data interface{}) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	if r.channel == nil || !r.channel.IsClosed() {
-		return fmt.Errorf("channel is not open")
+	if err := r.checkChannel(); err != nil {
+		return err
 	}
 
 	return r.channel.PublishWithContext(r.ctx, exchangeName, key, false, false, amqp.Publishing{
@@ -185,6 +209,9 @@ func (r *Rabbitmq) Topic(exchangeName, key string, data interface{}) error {
 }
 
 func (r *Rabbitmq) ReceiverTopic(exchangeName, key string) (<-chan amqp.Delivery, error) {
+	if err := r.checkChannel(); err != nil {
+		return nil, err
+	}
 	// 1、定义交换机
 	err := r.declareExchange(exchangeName, "topic", true, false, false, false, nil)
 	if err != nil {
@@ -230,6 +257,9 @@ func (r *Rabbitmq) ConsumeMsg() (<-chan amqp.Delivery, error) {
 接受订阅模式的消息,多个消费者收到的消息是一样的（类似把一则消息广播给多个人，每个人收到的消息是一致的）
 */
 func (r *Rabbitmq) ConsumePublish(exchangeName string) (<-chan amqp.Delivery, error) {
+	if err := r.checkChannel(); err != nil {
+		return nil, err
+	}
 	// 1、声明交换机
 	err := r.declareExchange(exchangeName, "fanout", true, false, false, false, nil)
 	if err != nil {
@@ -270,6 +300,9 @@ func (r *Rabbitmq) ConsumePublish(exchangeName string) (<-chan amqp.Delivery, er
 接受路由消息：当前消费者只会消费当前交换机产生指定key的消息
 */
 func (r *Rabbitmq) ConsumeRouting(exchangeName, key string) (<-chan amqp.Delivery, error) {
+	if err := r.checkChannel(); err != nil {
+		return nil, err
+	}
 	// 1、声明交换机
 	err := r.declareExchange(exchangeName, "direct", true, false, false, false, nil)
 	if err != nil {
@@ -313,6 +346,9 @@ china.yunnan.kunming (中国.云南.昆明)
 #:匹配零个或多个单词,如果队列绑定的Routing Key是user.#，那么它将匹配user、user.123、user.abc以及user.123.456等Routing Key。
 */
 func (r *Rabbitmq) ConsumeTopic(exchangeName, key string) (<-chan amqp.Delivery, error) {
+	if err := r.checkChannel(); err != nil {
+		return nil, err
+	}
 	// 1、声明交换机
 	err := r.declareExchange(exchangeName, "topic", true, false, false, false, nil)
 	if err != nil {
