@@ -39,6 +39,7 @@ func NewRabbitmq() (*Rabbitmq, error) {
 	}
 	mq.queueName = queueName
 	mq.channel, err = mq.conn.Channel()
+	mq.ctx = context.Background()
 	if err != nil {
 		return nil, err
 	}
@@ -47,7 +48,7 @@ func NewRabbitmq() (*Rabbitmq, error) {
 
 // 检查通道是否关闭
 func (r *Rabbitmq) checkChannel() error {
-	if r.channel != nil || !r.channel.IsClosed() {
+	if r.channel != nil && !r.channel.IsClosed() {
 		return nil
 	}
 	log.Println("channel 重新连接了")
@@ -271,6 +272,9 @@ func (r *Rabbitmq) ConsumePublish(exchangeName string) (<-chan amqp.Delivery, er
 		return nil, err
 	}
 
+	if err := r.channel.Qos(1, 0, false); err != nil {
+		return nil, err
+	}
 	// 3、交换机绑定上面创建的队列
 	err = r.channel.QueueBind(
 		q.Name,       // queue name：这里的队名名称会随机生成
@@ -325,7 +329,9 @@ func (r *Rabbitmq) ConsumeRouting(exchangeName, key string) (<-chan amqp.Deliver
 	if err != nil {
 		return nil, err
 	}
-
+	if err := r.channel.Qos(1, 0, false); err != nil {
+		return nil, err
+	}
 	// 4、消费消息
 	return r.channel.Consume(
 		q.Name, // queue
@@ -371,7 +377,9 @@ func (r *Rabbitmq) ConsumeTopic(exchangeName, key string) (<-chan amqp.Delivery,
 	if err != nil {
 		return nil, err
 	}
-
+	if err := r.channel.Qos(1, 0, false); err != nil {
+		return nil, err
+	}
 	// 4、消费消息
 	return r.channel.Consume(
 		q.Name, // queue
