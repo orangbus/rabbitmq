@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/goravel/framework/errors"
 	"github.com/goravel/framework/facades"
 	amqp "github.com/rabbitmq/amqp091-go"
 	"log"
@@ -37,9 +38,9 @@ func NewRabbitmq() (*Rabbitmq, error) {
 	if err != nil {
 		return nil, err
 	}
+	mq.ctx = context.Background()
 	mq.queueName = queueName
 	mq.channel, err = mq.conn.Channel()
-	mq.ctx = context.Background()
 	if err != nil {
 		return nil, err
 	}
@@ -51,10 +52,12 @@ func (r *Rabbitmq) checkChannel() error {
 	if r.channel != nil && !r.channel.IsClosed() {
 		return nil
 	}
-	log.Println("channel 重新连接了")
-	if _, err := NewRabbitmq(); err != nil {
-		return err
+	var err error
+	r.channel, err = r.conn.Channel()
+	if err != nil {
+		return errors.New(fmt.Sprintf("重新错误：%s", err.Error()))
 	}
+	log.Println("channel 重新连接了")
 	return nil
 }
 
@@ -83,22 +86,14 @@ func (c *Rabbitmq) Close() {
 
 // 统一发送消息
 func (r *Rabbitmq) seed(data any) error {
-	marshal, err := json.Marshal(data)
+	body, err := json.Marshal(data)
 	if err != nil {
 		return err
 	}
-
-	r.mu.Lock()
-	defer r.mu.Unlock()
-
-	if err := r.checkChannel(); err != nil {
-		return err
-	}
-
 	return r.channel.PublishWithContext(r.ctx, "", r.queueName, false, false, amqp.Publishing{
 		DeliveryMode: amqp.Persistent,
-		ContentType:  "text/plain",
-		Body:         marshal,
+		ContentType:  "application/json", // text/plain
+		Body:         body,
 	})
 }
 
@@ -107,9 +102,12 @@ func (r *Rabbitmq) seed(data any) error {
 发送一个普通消息，由默认的队列接受消息
 */
 func (r *Rabbitmq) Msg(data any) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	if err := r.checkChannel(); err != nil {
 		return err
 	}
+
 	_, err := r.declareQueue(r.queueName, true, false, false, false, nil)
 	if err != nil {
 		return err
@@ -124,9 +122,12 @@ func (r *Rabbitmq) Msg(data any) error {
 发布订阅模式：消息发送给交换机，由交换机路由到队列，由队列接受消息，可以由多个消费者消息
 */
 func (r *Rabbitmq) Publish(exchangeName string, data interface{}) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	if err := r.checkChannel(); err != nil {
 		return err
 	}
+
 	// 1、定义交换机
 	err := r.declareExchange(exchangeName, "fanout", true, false, false, false, nil)
 	if err != nil {
@@ -138,13 +139,9 @@ func (r *Rabbitmq) Publish(exchangeName string, data interface{}) error {
 		return err
 	}
 
-	r.mu.Lock()
-	defer r.mu.Unlock()
-
 	if err := r.checkChannel(); err != nil {
 		return err
 	}
-
 	return r.channel.PublishWithContext(r.ctx, exchangeName, "", false, false, amqp.Publishing{
 		DeliveryMode: amqp.Persistent,
 		ContentType:  "text/plain",
@@ -157,9 +154,12 @@ func (r *Rabbitmq) Publish(exchangeName string, data interface{}) error {
 举例：系统产生了错误消息，但是要求 A消费者只能接受 key=info 的消息，B消费者只能接受 key=debug 的消息， ....
 */
 func (r *Rabbitmq) Routing(exchangeName, key string, data interface{}) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	if err := r.checkChannel(); err != nil {
 		return err
 	}
+
 	// 1、定义 direct 类型的交换机
 	if err := r.declareExchange(exchangeName, "direct", true, false, false, false, nil); err != nil {
 		return err
@@ -168,10 +168,6 @@ func (r *Rabbitmq) Routing(exchangeName, key string, data interface{}) error {
 	if err2 != nil {
 		return err2
 	}
-
-	r.mu.Lock()
-	defer r.mu.Unlock()
-
 	if err := r.checkChannel(); err != nil {
 		return err
 	}
@@ -183,6 +179,8 @@ func (r *Rabbitmq) Routing(exchangeName, key string, data interface{}) error {
 }
 
 func (r *Rabbitmq) Topic(exchangeName, key string, data interface{}) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	if err := r.checkChannel(); err != nil {
 		return err
 	}
@@ -196,13 +194,9 @@ func (r *Rabbitmq) Topic(exchangeName, key string, data interface{}) error {
 		return err2
 	}
 
-	r.mu.Lock()
-	defer r.mu.Unlock()
-
 	if err := r.checkChannel(); err != nil {
 		return err
 	}
-
 	return r.channel.PublishWithContext(r.ctx, exchangeName, key, false, false, amqp.Publishing{
 		ContentType: "text/plain",
 		Body:        marshal,
@@ -242,6 +236,9 @@ func (r *Rabbitmq) ReceiverTopic(exchangeName, key string) (<-chan amqp.Delivery
 }
 
 func (r *Rabbitmq) ConsumeMsg() (<-chan amqp.Delivery, error) {
+	if err := r.checkChannel(); err != nil {
+		return nil, err
+	}
 	return r.channel.Consume(
 		r.queueName,
 		"",
