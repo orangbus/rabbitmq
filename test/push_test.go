@@ -3,8 +3,10 @@ package test
 import (
 	"fmt"
 	"github.com/orangbus/rabbitmq/facades"
+	"log"
 	"sync"
 	"testing"
+	"time"
 )
 
 func TestPushMsg(t *testing.T) {
@@ -30,23 +32,28 @@ func TestPushMsg(t *testing.T) {
 }
 
 func TestConsumerPush(t *testing.T) {
-	var wg sync.WaitGroup
-	for i := 0; i < 5; i++ {
-		wg.Add(1)
-		go func(i int) {
-			defer wg.Done()
-			msgs, err := facades.Rabbitmq().ConsumeMsg()
-			if err != nil {
-				t.Log(err.Error())
-				return
+	for i := 0; i < 2; i++ {
+		msgs, err := facades.Rabbitmq().ConsumeMsg()
+		if err != nil {
+			log.Print(err.Error())
+			return
+		}
+		for {
+			msg := <-msgs
+			log.Printf(fmt.Sprintf("%s", string(msg.Body)))
+			time.Sleep(time.Second)
+			if err := msg.Ack(false); err != nil {
+				log.Printf("消息处理失败：%s", err.Error())
 			}
-			for msg := range msgs {
-				t.Log(fmt.Sprintf("%d---%s", i, string(msg.Body)))
-				//time.Sleep(time.Second)
-				msg.Ack(false)
-			}
-		}(i)
+		}
+		//for msg := range msgs {
+		//	log.Printf(fmt.Sprintf("%s", string(msg.Body)))
+		//	time.Sleep(time.Second)
+		//	if err := msg.Ack(false); err != nil {
+		//		log.Printf("消息处理失败：%s", err.Error())
+		//	}
+		//}
 	}
-	wg.Wait()
+
 	select {}
 }

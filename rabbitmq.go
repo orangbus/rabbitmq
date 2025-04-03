@@ -9,6 +9,7 @@ import (
 	amqp "github.com/rabbitmq/amqp091-go"
 	"log"
 	"sync"
+	"time"
 )
 
 type Rabbitmq struct {
@@ -235,7 +236,7 @@ func (r *Rabbitmq) ReceiverTopic(exchangeName, key string) (<-chan amqp.Delivery
 	)
 }
 
-func (r *Rabbitmq) ConsumeMsg() (<-chan amqp.Delivery, error) {
+func (r *Rabbitmq) ConsumeMsg2(ch chan int) (<-chan amqp.Delivery, error) {
 	if err := r.checkChannel(); err != nil {
 		return nil, err
 	}
@@ -248,6 +249,34 @@ func (r *Rabbitmq) ConsumeMsg() (<-chan amqp.Delivery, error) {
 		false,
 		nil,
 	)
+}
+func (r *Rabbitmq) ConsumeMsg() (<-chan amqp.Delivery, error) {
+	if err := r.checkChannel(); err != nil {
+		return nil, err
+	}
+	msgs, err := r.channel.Consume(
+		r.queueName,
+		"",
+		false,
+		false,
+		false,
+		false,
+		nil,
+	)
+	if err != nil {
+		return nil, err
+	}
+	data := make(chan amqp.Delivery, 1)
+	go func() {
+		for msg := range msgs {
+			if err := r.checkChannel(); err != nil {
+				time.Sleep(time.Second)
+				continue
+			}
+			data <- msg
+		}
+	}()
+	return data, nil
 }
 
 /*

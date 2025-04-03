@@ -186,7 +186,6 @@ func TestConsumePublish(t *testing.T) {
 		}
 	}()
 	<-forever
-
 }
 func TestConsumeRouting(t *testing.T) {
 	msgs, err := rabbit.Rabbitmq().ConsumeRouting(routing_exchangeName, "error") // info
