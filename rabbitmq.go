@@ -9,7 +9,6 @@ import (
 	amqp "github.com/rabbitmq/amqp091-go"
 	"log"
 	"sync"
-	"time"
 )
 
 type Rabbitmq struct {
@@ -113,9 +112,6 @@ func (r *Rabbitmq) Msg(data any) error {
 	if err != nil {
 		return err
 	}
-	if err := r.channel.Qos(1, 0, false); err != nil {
-		return err
-	}
 	return r.seed(data)
 }
 
@@ -205,6 +201,8 @@ func (r *Rabbitmq) Topic(exchangeName, key string, data interface{}) error {
 }
 
 func (r *Rabbitmq) ReceiverTopic(exchangeName, key string) (<-chan amqp.Delivery, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	if err := r.checkChannel(); err != nil {
 		return nil, err
 	}
@@ -236,7 +234,9 @@ func (r *Rabbitmq) ReceiverTopic(exchangeName, key string) (<-chan amqp.Delivery
 	)
 }
 
-func (r *Rabbitmq) ConsumeMsg2(ch chan int) (<-chan amqp.Delivery, error) {
+func (r *Rabbitmq) ConsumeMsg() (<-chan amqp.Delivery, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	if err := r.checkChannel(); err != nil {
 		return nil, err
 	}
@@ -250,40 +250,14 @@ func (r *Rabbitmq) ConsumeMsg2(ch chan int) (<-chan amqp.Delivery, error) {
 		nil,
 	)
 }
-func (r *Rabbitmq) ConsumeMsg() (<-chan amqp.Delivery, error) {
-	if err := r.checkChannel(); err != nil {
-		return nil, err
-	}
-	msgs, err := r.channel.Consume(
-		r.queueName,
-		"",
-		false,
-		false,
-		false,
-		false,
-		nil,
-	)
-	if err != nil {
-		return nil, err
-	}
-	data := make(chan amqp.Delivery, 1)
-	go func() {
-		for msg := range msgs {
-			if err := r.checkChannel(); err != nil {
-				time.Sleep(time.Second)
-				continue
-			}
-			data <- msg
-		}
-	}()
-	return data, nil
-}
 
 /*
 *
 接受订阅模式的消息,多个消费者收到的消息是一样的（类似把一则消息广播给多个人，每个人收到的消息是一致的）
 */
 func (r *Rabbitmq) ConsumePublish(exchangeName string) (<-chan amqp.Delivery, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	if err := r.checkChannel(); err != nil {
 		return nil, err
 	}
@@ -330,6 +304,8 @@ func (r *Rabbitmq) ConsumePublish(exchangeName string) (<-chan amqp.Delivery, er
 接受路由消息：当前消费者只会消费当前交换机产生指定key的消息
 */
 func (r *Rabbitmq) ConsumeRouting(exchangeName, key string) (<-chan amqp.Delivery, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	if err := r.checkChannel(); err != nil {
 		return nil, err
 	}
@@ -378,6 +354,8 @@ china.yunnan.kunming (中国.云南.昆明)
 #:匹配零个或多个单词,如果队列绑定的Routing Key是user.#，那么它将匹配user、user.123、user.abc以及user.123.456等Routing Key。
 */
 func (r *Rabbitmq) ConsumeTopic(exchangeName, key string) (<-chan amqp.Delivery, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	if err := r.checkChannel(); err != nil {
 		return nil, err
 	}
