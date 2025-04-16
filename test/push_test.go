@@ -33,26 +33,25 @@ func TestPushMsg(t *testing.T) {
 
 func TestConsumerPush(t *testing.T) {
 	for i := 0; i < 2; i++ {
-		msgs, err := facades.Rabbitmq().ConsumeMsg()
-		if err != nil {
-			log.Print(err.Error())
-			return
-		}
-		for {
-			msg := <-msgs
-			log.Printf(fmt.Sprintf("%s", string(msg.Body)))
-			time.Sleep(time.Second)
-			if err := msg.Ack(false); err != nil {
-				log.Printf("消息处理失败：%s", err.Error())
+		go func() {
+			msgs, err := facades.Rabbitmq().ConsumeMsg()
+			if err != nil {
+				log.Print(err.Error())
+				return
 			}
-		}
-		//for msg := range msgs {
-		//	log.Printf(fmt.Sprintf("%s", string(msg.Body)))
-		//	time.Sleep(time.Second)
-		//	if err := msg.Ack(false); err != nil {
-		//		log.Printf("消息处理失败：%s", err.Error())
-		//	}
-		//}
+			for {
+				data := <-msgs
+				log.Printf(fmt.Sprintf("%s", string(data)))
+				time.Sleep(time.Second)
+			}
+			//for msg := range msgs {
+			//	log.Printf(fmt.Sprintf("%s", string(msg.Body)))
+			//	time.Sleep(time.Second)
+			//	if err := msg.Ack(false); err != nil {
+			//		log.Printf("消息处理失败：%s", err.Error())
+			//	}
+			//}
+		}()
 	}
 
 	select {}

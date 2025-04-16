@@ -2,7 +2,6 @@ package contracts
 
 import (
 	"github.com/orangbus/rabbitmq"
-	"github.com/rabbitmq/amqp091-go"
 )
 
 type Rabbitmq interface {
@@ -11,10 +10,10 @@ type Rabbitmq interface {
 	Routing(exchangeName, key string, data interface{}) error
 	Topic(exchangeName, key string, data interface{}) error
 
-	ConsumeMsg() (<-chan amqp091.Delivery, error)
-	ConsumePublish(exchangeName string) (<-chan amqp091.Delivery, error)
-	ConsumeRouting(exchangeName, key string) (<-chan amqp091.Delivery, error)
-	ConsumeTopic(exchangeName, key string) (<-chan amqp091.Delivery, error)
+	ConsumeMsg() (<-chan []byte, error)
+	ConsumePublish(exchangeName string) (<-chan []byte, error)
+	ConsumeRouting(exchangeName, key string) (<-chan []byte, error)
+	ConsumeTopic(exchangeName, key string) (<-chan []byte, error)
 
 	Dlx() *rabbitmq.Dlx
 }

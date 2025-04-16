@@ -4,6 +4,7 @@ import (
 	"github.com/goravel/framework/console"
 	"github.com/goravel/framework/contracts/foundation"
 	"github.com/goravel/framework/facades"
+	"github.com/goravel/framework/log"
 	"github.com/goravel/framework/support/carbon"
 
 	"github.com/orangbus/rabbitmq"
@@ -72,6 +73,7 @@ func init() {
 		// this array to grant expanded functionality to your applications.
 		"providers": []foundation.ServiceProvider{
 			&console.ServiceProvider{},
+			&log.ServiceProvider{},
 			&rabbitmq.ServiceProvider{},
 		},
 	})

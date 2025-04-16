@@ -9,11 +9,13 @@ import (
 	amqp "github.com/rabbitmq/amqp091-go"
 	"log"
 	"sync"
+	"time"
 )
 
 type Rabbitmq struct {
-	conn    *amqp.Connection
-	channel *amqp.Channel
+	conn          *amqp.Connection
+	channel       *amqp.Channel
+	prefetchCount int
 
 	ctx       context.Context
 	queueName string // 队列的名称
@@ -31,16 +33,18 @@ func NewRabbitmq() (*Rabbitmq, error) {
 	vhost := facades.Config().GetString("rabbitmq.vhost")
 	sdn := fmt.Sprintf("amqp://%s:%s@%s:%d/%s", name, password, host, port, vhost)
 	queueName := facades.Config().GetString("rabbitmq.queue")
+	prefetchCount := facades.Config().GetInt("rabbitmq.prefetchCount", 10)
 
 	var mq = &Rabbitmq{}
 	var err error
-	mq.conn, err = amqp.DialConfig(sdn, amqp.Config{Heartbeat: 10})
+	mq.conn, err = amqp.DialConfig(sdn, amqp.Config{Heartbeat: 60})
 	if err != nil {
 		return nil, err
 	}
 	mq.ctx = context.Background()
 	mq.queueName = queueName
 	mq.channel, err = mq.conn.Channel()
+	mq.prefetchCount = prefetchCount
 	if err != nil {
 		return nil, err
 	}
@@ -49,15 +53,18 @@ func NewRabbitmq() (*Rabbitmq, error) {
 
 // 检查通道是否关闭
 func (r *Rabbitmq) checkChannel() error {
+	if r.conn.IsClosed() {
+		return errors.New("rabbitmq 连接已经关闭")
+	}
 	if r.channel != nil && !r.channel.IsClosed() {
 		return nil
 	}
 	var err error
 	r.channel, err = r.conn.Channel()
 	if err != nil {
-		return errors.New(fmt.Sprintf("重新错误：%s", err.Error()))
+		return errors.New(fmt.Sprintf("channel重连错误：%s", err.Error()))
 	}
-	log.Println("channel 重新连接了")
+	log.Println("channel 已经重新连接")
 	return nil
 }
 
@@ -95,6 +102,81 @@ func (r *Rabbitmq) seed(data any) error {
 		ContentType:  "application/json", // text/plain
 		Body:         body,
 	})
+}
+
+// 接受消息
+func consume(r *Rabbitmq, ch chan<- []byte) {
+	notifyClose := r.channel.NotifyClose(make(chan *amqp.Error))
+	msgs, err := r.channel.Consume(
+		r.queueName,
+		"",
+		false,
+		false,
+		false,
+		false,
+		nil,
+	)
+	if err != nil {
+		facades.Log().Errorf("接受消息失败：%s", err.Error())
+		close(ch)
+		return
+	}
+	//go func() {
+	//	time.Sleep(time.Second * 2)
+	//	r.channel.Close()
+	//	log.Println("模拟通道关闭")
+	//}()
+
+	for {
+		select {
+		case <-notifyClose:
+			facades.Log().Errorf("Channel auto closed, attempting to reconnect")
+			// 尝试重新连接
+			if err := r.checkChannel(); err != nil {
+				facades.Log().Errorf("Failed to reconnect channel: %s", err.Error())
+				r.Close()
+				close(ch)
+				return
+			}
+			// 重新声明队列
+			if _, err := r.channel.QueueDeclare(r.queueName, true, false, false, false, nil); err != nil {
+				facades.Log().Errorf("Failed to redeclare queue: %v", err)
+				r.Close()
+				close(ch)
+				return
+			}
+			// 重新开始消费
+			msgs, err = r.channel.Consume(
+				r.queueName,
+				"",
+				false,
+				false,
+				false,
+				false,
+				nil,
+			)
+			if err != nil {
+				facades.Log().Errorf("Failed to restart consuming: %v", err)
+				r.Close()
+				close(ch)
+				return
+			}
+			notifyClose = r.channel.NotifyClose(make(chan *amqp.Error))
+			facades.Log().Errorf("Successfully reconnected and restarted consuming")
+		case msg, ok := <-msgs:
+			if !ok {
+				facades.Log().Errorf("消息通道已关闭，等待10秒...")
+				time.Sleep(time.Second * 10)
+				continue
+			}
+			if err := msg.Ack(false); err != nil {
+				facades.Log().Errorf("消息确认失败,停留3秒:%s", err.Error())
+				time.Sleep(time.Second * 3)
+				continue
+			}
+			ch <- msg.Body
+		}
+	}
 }
 
 /*
@@ -234,28 +316,32 @@ func (r *Rabbitmq) ReceiverTopic(exchangeName, key string) (<-chan amqp.Delivery
 	)
 }
 
-func (r *Rabbitmq) ConsumeMsg() (<-chan amqp.Delivery, error) {
+func (r *Rabbitmq) ConsumeMsg() (<-chan []byte, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+
+	// 检查通道是否OK
 	if err := r.checkChannel(); err != nil {
 		return nil, err
 	}
-	return r.channel.Consume(
-		r.queueName,
-		"",
-		false,
-		false,
-		false,
-		false,
-		nil,
-	)
+	// 申请队列
+	if _, err := r.declareQueue(r.queueName, true, false, false, false, nil); err != nil {
+		return nil, err
+	}
+	if err := r.channel.Qos(1, 0, false); err != nil {
+		return nil, err
+	}
+
+	ch := make(chan []byte, 1)
+	go consume(r, ch)
+	return ch, nil
 }
 
 /*
 *
 接受订阅模式的消息,多个消费者收到的消息是一样的（类似把一则消息广播给多个人，每个人收到的消息是一致的）
 */
-func (r *Rabbitmq) ConsumePublish(exchangeName string) (<-chan amqp.Delivery, error) {
+func (r *Rabbitmq) ConsumePublish(exchangeName string) (<-chan []byte, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if err := r.checkChannel(); err != nil {
@@ -288,22 +374,16 @@ func (r *Rabbitmq) ConsumePublish(exchangeName string) (<-chan amqp.Delivery, er
 	}
 
 	// 4、消费消息
-	return r.channel.Consume(
-		q.Name, // queue
-		"",     // consumer
-		false,  // auto ack
-		false,  // exclusive
-		false,  // no local
-		false,  // no wait
-		nil,    // args
-	)
+	ch := make(chan []byte, 1)
+	go consume(r, ch)
+	return ch, nil
 }
 
 /*
 *
 接受路由消息：当前消费者只会消费当前交换机产生指定key的消息
 */
-func (r *Rabbitmq) ConsumeRouting(exchangeName, key string) (<-chan amqp.Delivery, error) {
+func (r *Rabbitmq) ConsumeRouting(exchangeName, key string) (<-chan []byte, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if err := r.checkChannel(); err != nil {
@@ -315,7 +395,7 @@ func (r *Rabbitmq) ConsumeRouting(exchangeName, key string) (<-chan amqp.Deliver
 		return nil, err
 	}
 	// 2、声明一个队列，队名的名称会随机生成
-	q, err := r.declareQueue("", false, false, true, false, nil)
+	q, err := r.declareQueue("", true, false, true, false, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -335,15 +415,9 @@ func (r *Rabbitmq) ConsumeRouting(exchangeName, key string) (<-chan amqp.Deliver
 		return nil, err
 	}
 	// 4、消费消息
-	return r.channel.Consume(
-		q.Name, // queue
-		"",     // consumer
-		false,  // auto ack
-		false,  // exclusive
-		false,  // no local
-		false,  // no wait
-		nil,    // args
-	)
+	ch := make(chan []byte, 1)
+	go consume(r, ch)
+	return ch, nil
 }
 
 /*
@@ -353,7 +427,7 @@ china.yunnan.kunming (中国.云南.昆明)
 *: 匹配一个单词,例如，如果队列绑定的Routing Key是user.*，那么它将匹配user.123、user.abc等Routing Key，但不会匹配user.123.456。
 #:匹配零个或多个单词,如果队列绑定的Routing Key是user.#，那么它将匹配user、user.123、user.abc以及user.123.456等Routing Key。
 */
-func (r *Rabbitmq) ConsumeTopic(exchangeName, key string) (<-chan amqp.Delivery, error) {
+func (r *Rabbitmq) ConsumeTopic(exchangeName, key string) (<-chan []byte, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if err := r.checkChannel(); err != nil {
@@ -365,7 +439,7 @@ func (r *Rabbitmq) ConsumeTopic(exchangeName, key string) (<-chan amqp.Delivery,
 		return nil, err
 	}
 	// 2、声明一个队列，队名的名称会随机生成
-	q, err := r.declareQueue("", false, false, true, false, nil)
+	q, err := r.declareQueue("", true, false, false, false, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -385,13 +459,7 @@ func (r *Rabbitmq) ConsumeTopic(exchangeName, key string) (<-chan amqp.Delivery,
 		return nil, err
 	}
 	// 4、消费消息
-	return r.channel.Consume(
-		q.Name, // queue
-		"",     // consumer
-		false,  // auto ack
-		false,  // exclusive
-		false,  // no local
-		false,  // no wait
-		nil,    // args
-	)
+	ch := make(chan []byte, 1)
+	go consume(r, ch)
+	return ch, nil
 }

@@ -77,7 +77,7 @@ func TestMsg(t *testing.T) {
 					log.Printf("rabbitmq 普通消息发送失败：%s", err.Error())
 				}
 				log.Printf("rabbitmq 普通消息发送成功：%d", total)
-				time.Sleep(time.Millisecond * 500)
+				time.Sleep(time.Millisecond * 100)
 			}
 		}()
 	}
@@ -156,9 +156,8 @@ func TestConsume(t *testing.T) {
 
 	var forever chan struct{}
 	go func() {
-		for data := range msgs {
-			log.Printf("接收到mq的普通消息是：%s", string(data.Body))
-			err := data.Ack(false)
+		for msg := range msgs {
+			log.Printf("接收到mq的普通消息是：%s", string(msg))
 			if err != nil {
 				log.Printf("ack error: %s", err.Error())
 			}
@@ -177,11 +176,7 @@ func TestConsumePublish(t *testing.T) {
 	forever := make(chan bool)
 	go func() {
 		for msg := range msgs {
-			log.Printf("[%s]订阅消息：%s", publish_exchangeName, string(msg.Body))
-			err := msg.Ack(false)
-			if err != nil {
-				log.Printf("ack error: %s", err.Error())
-			}
+			log.Printf("[%s]订阅消息：%s", publish_exchangeName, string(msg))
 			time.Sleep(time.Second)
 		}
 	}()
@@ -196,11 +191,7 @@ func TestConsumeRouting(t *testing.T) {
 	forever := make(chan bool)
 	go func() {
 		for msg := range msgs {
-			log.Printf("[%s:%s]路由消息：%s", routing_exchangeName, routing_key, string(msg.Body))
-			err := msg.Ack(false)
-			if err != nil {
-				log.Printf("ack error: %s", err.Error())
-			}
+			log.Printf("[%s:%s]路由消息：%s", routing_exchangeName, routing_key, string(msg))
 			time.Sleep(time.Second)
 		}
 	}()
@@ -215,11 +206,7 @@ func TestConsumeTopic(t *testing.T) {
 	forever := make(chan bool)
 	go func() {
 		for msg := range msgs {
-			log.Printf("[%s:%s]主题消息：%s", top_exchangeName, top_key, string(msg.Body))
-			err := msg.Ack(false)
-			if err != nil {
-				log.Printf("ack error: %s", err.Error())
-			}
+			log.Printf("[%s:%s]主题消息：%s", top_exchangeName, top_key, string(msg))
 			time.Sleep(time.Second)
 		}
 	}()
