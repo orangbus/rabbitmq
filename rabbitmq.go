@@ -364,7 +364,7 @@ func (r *Rabbitmq) ConsumePublish(exchangeName string, queueName ...string) (<-c
 		return nil, err
 	}
 	// 2、声明一个队列，队名的名称会随机生成
-	q, err := r.declareQueue(customQueueName, durable, false, !durable, false, nil)
+	q, err := r.declareQueue(customQueueName, durable, false, false, false, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -414,7 +414,7 @@ func (r *Rabbitmq) ConsumeRouting(exchangeName, key string, queueName ...string)
 		return nil, err
 	}
 	// 2、声明一个队列，队名的名称会随机生成
-	q, err := r.declareQueue(customQueueName, durable, false, !durable, false, nil)
+	q, err := r.declareQueue(customQueueName, durable, false, false, false, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -468,7 +468,7 @@ func (r *Rabbitmq) ConsumeTopic(exchangeName, key string, queueName ...string) (
 		return nil, err
 	}
 	// 2、声明一个队列，队名的名称会随机生成
-	q, err := r.declareQueue(customQueueName, durable, false, !durable, false, nil)
+	q, err := r.declareQueue(customQueueName, durable, false, false, false, nil)
 	if err != nil {
 		return nil, err
 	}
