@@ -180,8 +180,12 @@ func consume(r *Rabbitmq, ch chan<- []byte) {
 }
 
 /*
-*
 发送一个普通消息，由默认的队列接受消息
+name: 队列名称，设为空字符串 "" 时由 RabbitMQ 自动生成唯一名称。
+durable: 是否持久化，设为 false 表示非持久化（重启后丢失）。
+autoDelete: 设为 false 表示不是自动删除（这里由连接关闭触发删除）。
+exclusive: 设为 true 表示该队列是独占的，只有当前连接可以访问。当连接关闭时，队列会被自动删除。
+noWait: 是否不等待服务器确认，设为 false 表示等待确认
 */
 func (r *Rabbitmq) Msg(data any) error {
 	r.mu.Lock()
@@ -328,7 +332,7 @@ func (r *Rabbitmq) ConsumeMsg() (<-chan []byte, error) {
 	if _, err := r.declareQueue(r.queueName, true, false, false, false, nil); err != nil {
 		return nil, err
 	}
-	if err := r.channel.Qos(1, 0, false); err != nil {
+	if err := r.channel.Qos(r.prefetchCount, 0, false); err != nil {
 		return nil, err
 	}
 
@@ -341,9 +345,16 @@ func (r *Rabbitmq) ConsumeMsg() (<-chan []byte, error) {
 *
 接受订阅模式的消息,多个消费者收到的消息是一样的（类似把一则消息广播给多个人，每个人收到的消息是一致的）
 */
-func (r *Rabbitmq) ConsumePublish(exchangeName string) (<-chan []byte, error) {
+func (r *Rabbitmq) ConsumePublish(exchangeName string, queueName ...string) (<-chan []byte, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	customQueueName := ""
+	durable := false // 指定了队列的时候就持久化
+	if len(queueName) > 0 {
+		customQueueName = queueName[0]
+		durable = true
+	}
+	r.queueName = customQueueName
 	if err := r.checkChannel(); err != nil {
 		return nil, err
 	}
@@ -353,12 +364,14 @@ func (r *Rabbitmq) ConsumePublish(exchangeName string) (<-chan []byte, error) {
 		return nil, err
 	}
 	// 2、声明一个队列，队名的名称会随机生成
-	q, err := r.declareQueue("", false, false, true, false, nil)
+	q, err := r.declareQueue(customQueueName, durable, false, !durable, false, nil)
 	if err != nil {
 		return nil, err
 	}
-
-	if err := r.channel.Qos(1, 0, false); err != nil {
+	if len(queueName) > 0 {
+		r.queueName = q.Name
+	}
+	if err := r.channel.Qos(r.prefetchCount, 0, false); err != nil {
 		return nil, err
 	}
 	// 3、交换机绑定上面创建的队列
@@ -383,9 +396,15 @@ func (r *Rabbitmq) ConsumePublish(exchangeName string) (<-chan []byte, error) {
 *
 接受路由消息：当前消费者只会消费当前交换机产生指定key的消息
 */
-func (r *Rabbitmq) ConsumeRouting(exchangeName, key string) (<-chan []byte, error) {
+func (r *Rabbitmq) ConsumeRouting(exchangeName, key string, queueName ...string) (<-chan []byte, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	customQueueName := ""
+	durable := false // 指定了队列的时候就持久化
+	if len(queueName) > 0 {
+		customQueueName = queueName[0]
+		durable = true
+	}
 	if err := r.checkChannel(); err != nil {
 		return nil, err
 	}
@@ -395,9 +414,12 @@ func (r *Rabbitmq) ConsumeRouting(exchangeName, key string) (<-chan []byte, erro
 		return nil, err
 	}
 	// 2、声明一个队列，队名的名称会随机生成
-	q, err := r.declareQueue("", true, false, true, false, nil)
+	q, err := r.declareQueue(customQueueName, durable, false, !durable, false, nil)
 	if err != nil {
 		return nil, err
+	}
+	if len(queueName) > 0 {
+		r.queueName = q.Name
 	}
 
 	// 3、交换机绑定上面创建的队列
@@ -411,7 +433,7 @@ func (r *Rabbitmq) ConsumeRouting(exchangeName, key string) (<-chan []byte, erro
 	if err != nil {
 		return nil, err
 	}
-	if err := r.channel.Qos(1, 0, false); err != nil {
+	if err := r.channel.Qos(r.prefetchCount, 0, false); err != nil {
 		return nil, err
 	}
 	// 4、消费消息
@@ -427,9 +449,16 @@ china.yunnan.kunming (中国.云南.昆明)
 *: 匹配一个单词,例如，如果队列绑定的Routing Key是user.*，那么它将匹配user.123、user.abc等Routing Key，但不会匹配user.123.456。
 #:匹配零个或多个单词,如果队列绑定的Routing Key是user.#，那么它将匹配user、user.123、user.abc以及user.123.456等Routing Key。
 */
-func (r *Rabbitmq) ConsumeTopic(exchangeName, key string) (<-chan []byte, error) {
+func (r *Rabbitmq) ConsumeTopic(exchangeName, key string, queueName ...string) (<-chan []byte, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	customQueueName := ""
+	durable := false // 指定了队列的时候就持久化
+	if len(queueName) > 0 {
+		customQueueName = queueName[0]
+		durable = true
+	}
+
 	if err := r.checkChannel(); err != nil {
 		return nil, err
 	}
@@ -439,9 +468,12 @@ func (r *Rabbitmq) ConsumeTopic(exchangeName, key string) (<-chan []byte, error)
 		return nil, err
 	}
 	// 2、声明一个队列，队名的名称会随机生成
-	q, err := r.declareQueue("", true, false, false, false, nil)
+	q, err := r.declareQueue(customQueueName, durable, false, !durable, false, nil)
 	if err != nil {
 		return nil, err
+	}
+	if len(queueName) > 0 {
+		r.queueName = q.Name
 	}
 
 	// 3、交换机绑定上面创建的队列
@@ -455,7 +487,7 @@ func (r *Rabbitmq) ConsumeTopic(exchangeName, key string) (<-chan []byte, error)
 	if err != nil {
 		return nil, err
 	}
-	if err := r.channel.Qos(1, 0, false); err != nil {
+	if err := r.channel.Qos(r.prefetchCount, 0, false); err != nil {
 		return nil, err
 	}
 	// 4、消费消息
